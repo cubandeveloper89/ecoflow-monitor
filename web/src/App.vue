@@ -1,13 +1,16 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useEcoflow } from './composables/useEcoflow'
-import BatteryRing from './components/BatteryRing.vue'
+import PowerFlow from './components/PowerFlow.vue'
 import StatCard from './components/StatCard.vue'
 import PowerChart from './components/PowerChart.vue'
 import EnergyChart from './components/EnergyChart.vue'
-import type { Sample, DayEnergy } from './types'
+import OutagesPanel from './components/OutagesPanel.vue'
+import BatteryHealth from './components/BatteryHealth.vue'
+import { C } from './theme'
+import type { Sample, DayEnergy, OutageReport } from './types'
 
-const { live, online, connected, mock, sn } = useEcoflow()
+const { live, online, connected, mock, sn, outageTick } = useEcoflow()
 
 const netW = computed(() => (live.value?.inW ?? 0) - (live.value?.outW ?? 0))
 
@@ -48,86 +51,165 @@ async function loadEnergy() {
 }
 watch(hours, loadHistory)
 
+const outages = ref<OutageReport | null>(null)
+async function loadOutages() {
+  outages.value = await fetch('/api/outages?days=30').then((r) => r.json())
+}
+watch(outageTick, loadOutages)
+
+/* Segmented control indicator: sized to the active button, moved by transform. */
+const segBtns = ref<HTMLButtonElement[]>([])
+const ind = ref({ x: 0, w: 0 })
+function placeIndicator() {
+  const i = ranges.findIndex((r) => r.hours === hours.value)
+  const b = segBtns.value[i]
+  if (b) ind.value = { x: b.offsetLeft, w: b.offsetWidth }
+}
+watch(hours, () => nextTick(placeIndicator))
+
 let timer: number | undefined
+let ro: ResizeObserver | undefined
 onMounted(() => {
   loadHistory()
   loadEnergy()
+  loadOutages()
   timer = window.setInterval(() => {
     loadHistory()
     loadEnergy()
+    loadOutages()
   }, 30_000)
+  placeIndicator()
+  document.fonts?.ready.then(placeIndicator)
+  ro = new ResizeObserver(placeIndicator)
+  if (segBtns.value[0]?.parentElement) ro.observe(segBtns.value[0].parentElement)
 })
-onUnmounted(() => clearInterval(timer))
+onUnmounted(() => {
+  clearInterval(timer)
+  ro?.disconnect()
+})
 
-const kwh = (wh?: number) => (wh == null ? '—' : wh >= 1000 ? `${(wh / 1000).toFixed(2)} kWh` : `${wh} Wh`)
+const kwh = (wh?: number) =>
+  wh == null ? '—' : wh >= 1000 ? (wh / 1000).toLocaleString('es', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : String(wh)
+const kwhUnit = (wh?: number) => (wh == null ? '' : wh >= 1000 ? 'kWh' : 'Wh')
+const todayNet = computed(() => (today.value ? today.value.inWh - today.value.outWh : undefined))
+const share = (part?: number, total?: number) => (part && total ? `${Math.round((part / total) * 100)}%` : '0%')
 const updated = computed(() => (live.value ? new Date(live.value.ts).toLocaleTimeString('es') : '—'))
 </script>
 
 <template>
-  <div class="mx-auto max-w-6xl px-4 py-6 text-slate-200">
-    <header class="mb-6 flex flex-wrap items-center justify-between gap-3">
+  <div class="mx-auto max-w-[1200px] px-4 pb-12 pt-6 sm:px-6 lg:px-8 lg:pt-8">
+    <!-- Header -->
+    <header class="enter mb-6 flex flex-wrap items-end justify-between gap-4 lg:mb-8" style="--i: 0">
       <div>
-        <h1 class="text-2xl font-semibold text-white">EcoFlow Monitor</h1>
-        <p class="text-sm text-slate-500">
-          {{ mock ? 'Modo simulado' : `SN ${sn}` }} · actualizado {{ updated }}
+        <h1 class="text-xl font-semibold tracking-tight text-ink sm:text-2xl">EcoFlow Monitor</h1>
+        <p class="mt-1 text-[13px] text-muted">
+          {{ mock ? 'Modo simulado' : `SN ${sn || '—'}` }}
+          <span class="mx-1.5 text-faint">·</span>
+          actualizado <span class="num text-text">{{ updated }}</span>
         </p>
       </div>
-      <div class="flex gap-2 text-xs">
-        <span class="rounded-full px-3 py-1" :class="connected ? 'bg-emerald-500/15 text-emerald-300' : 'bg-red-500/15 text-red-300'">
-          {{ connected ? 'Servidor conectado' : 'Sin servidor' }}
-        </span>
-        <span class="rounded-full px-3 py-1" :class="online ? 'bg-emerald-500/15 text-emerald-300' : 'bg-slate-700 text-slate-400'">
-          {{ online ? 'Equipo en línea' : 'Equipo offline' }}
-        </span>
-      </div>
+      <ul class="flex flex-wrap gap-2 text-[13px]" aria-label="Estado de conexión">
+        <li class="flex items-center gap-2 rounded-full border border-line bg-surface px-3 py-1.5">
+          <span class="size-2 rounded-full" :style="{ background: connected ? C.charge : C.low }" />
+          <span :class="connected ? 'text-text' : 'text-low'">{{ connected ? 'Servidor conectado' : 'Sin servidor' }}</span>
+        </li>
+        <li class="flex items-center gap-2 rounded-full border border-line bg-surface px-3 py-1.5">
+          <span class="size-2 rounded-full" :style="{ background: online ? C.charge : C.faint }" />
+          <span :class="online ? 'text-text' : 'text-muted'">{{ online ? 'Equipo en línea' : 'Equipo offline' }}</span>
+        </li>
+      </ul>
     </header>
 
-    <section class="grid gap-4 md:grid-cols-[auto_1fr]">
-      <div class="flex flex-col items-center justify-center rounded-2xl border border-slate-800 bg-slate-900/60 p-6">
-        <BatteryRing :soc="live?.soc ?? null" :net-w="netW" />
-        <p class="mt-3 h-5 text-sm text-slate-400">{{ remaining }}</p>
-        <p v-if="live?.tempC != null" class="text-xs text-slate-500">Temp. batería {{ live.tempC }} °C</p>
-      </div>
-
-      <div class="grid grid-cols-2 gap-4 lg:grid-cols-3">
-        <StatCard label="Entrada total" :value="live?.inW ?? null" accent="#34d399" />
-        <StatCard label="Salida total" :value="live?.outW ?? null" accent="#fb923c" />
-        <StatCard label="Balance" :value="live ? netW : null" :accent="netW >= 0 ? '#34d399' : '#fb923c'" hint="Entrada − salida" />
-        <StatCard label="Red eléctrica (AC in)" :value="live?.acInW ?? null" accent="#60a5fa" />
-        <StatCard label="Solar" :value="live?.pvInW ?? null" accent="#facc15" />
-        <StatCard label="Salida AC / DC" :value="live?.acOutW ?? null" accent="#f472b6" :hint="live?.dcOutW != null ? `DC/USB: ${live.dcOutW} W` : undefined" />
-      </div>
-    </section>
-
-    <section class="mt-6 rounded-2xl border border-slate-800 bg-slate-900/60 p-4">
-      <div class="mb-3 flex items-center justify-between">
-        <h2 class="font-medium text-white">Potencia y batería</h2>
-        <div class="flex gap-1 rounded-lg bg-slate-800 p-1 text-xs">
-          <button
-            v-for="r in ranges" :key="r.hours" @click="hours = r.hours"
-            class="rounded-md px-3 py-1 transition"
-            :class="hours === r.hours ? 'bg-slate-600 text-white' : 'text-slate-400 hover:text-white'"
-          >{{ r.label }}</button>
+    <main>
+      <!-- Live power flow -->
+      <section class="panel enter p-5 sm:p-6 lg:p-8" style="--i: 1" aria-labelledby="flow-h">
+        <div class="mb-6 flex items-baseline justify-between gap-4 lg:mb-8">
+          <h2 id="flow-h" class="text-base font-medium text-ink">Flujo de energía ahora</h2>
+          <span class="eyebrow hidden md:inline">Entradas → batería → salidas</span>
         </div>
-      </div>
-      <PowerChart v-if="samples.length" :samples="samples" :hours="hours" />
-      <p v-else class="py-16 text-center text-sm text-slate-500">Aún no hay historial. Se guarda una muestra cada 15 s.</p>
-    </section>
+        <PowerFlow :live="live" :net-w="netW" :remaining="remaining" />
+      </section>
 
-    <section class="mt-6 grid gap-4 md:grid-cols-[1fr_2fr]">
-      <div class="rounded-2xl border border-slate-800 bg-slate-900/60 p-4">
-        <h2 class="mb-4 font-medium text-white">Hoy</h2>
-        <dl class="space-y-3 text-sm">
-          <div class="flex justify-between"><dt class="text-slate-400">Energía cargada</dt><dd class="font-medium text-emerald-300">{{ kwh(today?.inWh) }}</dd></div>
-          <div class="flex justify-between pl-3"><dt class="text-slate-500">de la red</dt><dd>{{ kwh(today?.acInWh) }}</dd></div>
-          <div class="flex justify-between pl-3"><dt class="text-slate-500">solar</dt><dd>{{ kwh(today?.pvInWh) }}</dd></div>
-          <div class="flex justify-between"><dt class="text-slate-400">Energía consumida</dt><dd class="font-medium text-orange-300">{{ kwh(today?.outWh) }}</dd></div>
-        </dl>
-      </div>
-      <div class="rounded-2xl border border-slate-800 bg-slate-900/60 p-4">
-        <h2 class="mb-3 font-medium text-white">Últimos 7 días</h2>
-        <EnergyChart :days="energy" />
-      </div>
-    </section>
+      <!-- Totals -->
+      <section class="enter mt-4 grid grid-cols-3 gap-3 sm:gap-4" style="--i: 2" aria-label="Totales en vivo">
+        <StatCard label="Entrada total" :value="live?.inW ?? null" :accent="C.charge" hint="Red + solar" />
+        <StatCard label="Salida total" :value="live?.outW ?? null" :accent="C.discharge" hint="AC + DC / USB" />
+        <StatCard
+          label="Balance" :value="live ? netW : null" signed
+          :accent="netW >= 0 ? C.charge : C.discharge" hint="Entrada − salida"
+        />
+      </section>
+
+      <!-- History -->
+      <section class="panel enter mt-4 p-5 sm:p-6 lg:p-8" style="--i: 3" aria-labelledby="hist-h">
+        <div class="mb-5 flex flex-wrap items-center justify-between gap-4">
+          <h2 id="hist-h" class="text-base font-medium text-ink">Potencia y batería</h2>
+          <div class="seg w-full sm:w-auto" role="group" aria-label="Rango de tiempo">
+            <span class="seg__ind" :style="{ width: `${ind.w}px`, transform: `translateX(${ind.x}px)` }" aria-hidden="true" />
+            <button
+              v-for="r in ranges" :key="r.hours" ref="segBtns" type="button"
+              class="seg__btn" :aria-pressed="hours === r.hours" @click="hours = r.hours"
+            >{{ r.label }}</button>
+          </div>
+        </div>
+        <PowerChart v-if="samples.length" :samples="samples" :hours="hours" />
+        <p v-else class="grid h-80 place-items-center text-center text-sm text-muted">
+          Aún no hay historial. El servidor guarda una muestra cada 15 s.
+        </p>
+      </section>
+
+      <!-- Energy -->
+      <section class="enter mt-4 grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,2fr)]" style="--i: 4">
+        <div class="panel flex flex-col p-5 sm:p-6 lg:p-8" aria-labelledby="today-h">
+          <h2 id="today-h" class="text-base font-medium text-ink">Energía de hoy</h2>
+
+          <div class="mt-6">
+            <p class="text-[13px] font-medium text-muted">Cargada</p>
+            <p class="num mt-1.5 text-4xl font-medium leading-none" :style="{ color: C.charge }">
+              {{ kwh(today?.inWh) }}<span class="ml-1.5 font-sans text-base font-normal tracking-normal text-muted">{{ kwhUnit(today?.inWh) }}</span>
+            </p>
+            <div class="mt-4 flex h-2 overflow-hidden rounded-full bg-line" aria-hidden="true">
+              <div :style="{ width: share(today?.acInWh, today?.inWh), background: C.grid }" />
+              <div :style="{ width: share(today?.pvInWh, today?.inWh), background: C.solar }" />
+            </div>
+            <dl class="mt-3 grid grid-cols-2 gap-2 text-[13px]">
+              <div class="flex items-center gap-2">
+                <span class="chip" :style="{ background: C.grid }" /><dt class="text-muted">Red</dt>
+                <dd class="num ml-auto text-text">{{ kwh(today?.acInWh) }} {{ kwhUnit(today?.acInWh) }}</dd>
+              </div>
+              <div class="flex items-center gap-2 border-l border-line pl-3">
+                <span class="chip" :style="{ background: C.solar }" /><dt class="text-muted">Solar</dt>
+                <dd class="num ml-auto text-text">{{ kwh(today?.pvInWh) }} {{ kwhUnit(today?.pvInWh) }}</dd>
+              </div>
+            </dl>
+          </div>
+
+          <div class="mt-6 border-t border-line pt-6">
+            <p class="text-[13px] font-medium text-muted">Consumida</p>
+            <p class="num mt-1.5 text-4xl font-medium leading-none" :style="{ color: C.discharge }">
+              {{ kwh(today?.outWh) }}<span class="ml-1.5 font-sans text-base font-normal tracking-normal text-muted">{{ kwhUnit(today?.outWh) }}</span>
+            </p>
+          </div>
+
+          <div class="mt-6 flex items-baseline justify-between border-t border-line pt-4 text-[13px] lg:mt-auto">
+            <span class="text-muted">Balance del día</span>
+            <span class="num text-sm text-ink">
+              {{ todayNet == null ? '—' : (todayNet >= 0 ? '+' : '−') + kwh(Math.abs(todayNet)) + ' ' + kwhUnit(Math.abs(todayNet)) }}
+            </span>
+          </div>
+        </div>
+
+        <div class="panel p-5 sm:p-6 lg:p-8" aria-labelledby="week-h">
+          <h2 id="week-h" class="mb-5 text-base font-medium text-ink">Últimos 7 días</h2>
+          <EnergyChart :days="energy" />
+        </div>
+      </section>
+
+      <!-- Apagones + batería -->
+      <section class="enter mt-4 grid gap-4 lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]" style="--i: 5">
+        <OutagesPanel :report="outages" :grid-on="live?.gridOn ?? null" />
+        <BatteryHealth :battery="live?.battery ?? null" :temp-c="live?.tempC ?? null" />
+      </section>
+    </main>
   </div>
 </template>

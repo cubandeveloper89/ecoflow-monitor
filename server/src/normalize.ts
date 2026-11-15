@@ -17,7 +17,28 @@ export interface Snapshot {
   chgRemainMin: number | null
   dsgRemainMin: number | null
   tempC: number | null
+  /** Voltaje de entrada AC y si hay corriente de la red (≥ 80 V) */
+  gridV: number | null
+  gridOn: boolean | null
+  pvTempC: number | null
+  battery: BatteryInfo
 }
+
+export interface BatteryInfo {
+  cycles: number | null
+  sohPct: number | null
+  designCapMah: number | null
+  fullCapMah: number | null
+  remainCapMah: number | null
+  voltV: number | null
+  cellMinMv: number | null
+  cellMaxMv: number | null
+  /** Energía acumulada de toda la vida del equipo (Wh) */
+  lifetimeChgWh: number | null
+  lifetimeDsgWh: number | null
+}
+
+export const GRID_ON_MIN_V = 80
 
 type Raw = Record<string, unknown>
 
@@ -52,15 +73,40 @@ export function normalize(raw: Raw): Snapshot {
   const inW = first(raw, ['powInSumW', 'pd.wattsInSum'])
   const outW = first(raw, ['powOutSumW', 'pd.wattsOutSum'])
   const acInW = first(raw, ['powGetAcIn', 'inv.inputWatts'])
-  const pvInW =
-    sum(raw, ['powGetPvH', 'powGetPvL']) ?? first(raw, ['powGetPv', 'powGetPv2', 'mppt.inWatts'])
-  const acOutW =
-    sum(raw, ['powGetAcHvOut', 'powGetAcLvOut']) ?? first(raw, ['powGetAc', 'powGetAcOut', 'inv.outputWatts'])
+  // Delta 3 Plus tiene 2 MPPT (powGetPv + powGetPv2); Pro 3 usa PvH/PvL
+  const pvInW = sum(raw, ['powGetPv', 'powGetPv2']) ?? sum(raw, ['powGetPvH', 'powGetPvL']) ?? first(raw, ['mppt.inWatts'])
+  const acOutRaw =
+    sum(raw, ['powGetAcHvOut', 'powGetAcLvOut']) ?? first(raw, ['powGetAcOut', 'powGetAc', 'inv.outputWatts'])
+  const acOutW = acOutRaw === null ? null : Math.abs(acOutRaw)
   const dcOutW = outW !== null && acOutW !== null ? Math.max(0, outW - acOutW) : null
 
   const chgRemainMin = first(raw, ['cmsChgRemTime', 'ems.chgRemainTime'])
   const dsgRemainMin = first(raw, ['cmsDsgRemTime', 'ems.dsgRemainTime'])
   const tempC = first(raw, ['bmsMaxCellTemp', 'bmsMaster.temp', 'bmsMaster.maxCellTemp'])
+
+  const gridV = first(raw, ['plugInInfoAcInVol'])
+  const gridOn = gridV !== null ? gridV >= GRID_ON_MIN_V : acInW !== null && acInW > 0 ? true : null
+
+  const positive = (raw2: Raw, keys: string[]) => {
+    for (const k of keys) {
+      const n = num(raw2[k])
+      if (n !== null && n > 0) return n
+    }
+    return null
+  }
+
+  const battery: BatteryInfo = {
+    cycles: first(raw, ['cycles', 'bmsMaster.cycles']),
+    sohPct: round(positive(raw, ['realSoh', 'bmsBattSoh', 'soh', 'bmsMaster.soh']), 1),
+    designCapMah: positive(raw, ['designCap', 'bmsDesignCap', 'bmsMaster.designCap']),
+    fullCapMah: positive(raw, ['fullCap', 'bmsFullCap', 'bmsMaster.fullCap']),
+    remainCapMah: positive(raw, ['remainCap', 'bmsRemainCap', 'bmsMaster.remainCap']),
+    voltV: round(positive(raw, ['bmsBattVol', 'cmsBattVol']), 1),
+    cellMinMv: positive(raw, ['bmsMinCellVol', 'minCellVol', 'bmsMaster.minCellVol']),
+    cellMaxMv: positive(raw, ['bmsMaxCellVol', 'maxCellVol', 'bmsMaster.maxCellVol']),
+    lifetimeChgWh: positive(raw, ['accuChgEnergy']),
+    lifetimeDsgWh: positive(raw, ['accuDsgEnergy']),
+  }
 
   return {
     ts: Date.now(),
@@ -74,6 +120,10 @@ export function normalize(raw: Raw): Snapshot {
     chgRemainMin,
     dsgRemainMin,
     tempC: round(tempC, 1),
+    gridV: round(gridV),
+    gridOn,
+    pvTempC: first(raw, ['tempPv']),
+    battery,
   }
 }
 

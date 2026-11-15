@@ -1,13 +1,149 @@
 @import 'tailwindcss';
 
 @theme {
-  --color-charge: #34d399;
-  --color-discharge: #fb923c;
-  --color-solar: #facc15;
-  --color-grid: #60a5fa;
+  --font-sans: 'Geist', ui-sans-serif, system-ui, sans-serif;
+  --font-mono: 'Geist Mono', ui-monospace, 'SF Mono', Menlo, monospace;
+
+  --color-ground: #0b0d0c;
+  --color-surface: #121513;
+  --color-raised: #191d1a;
+  --color-line: #222724;
+  --color-line-strong: #2e3530;
+  --color-ink: #eef1ec;
+  --color-text: #c8cec7;
+  --color-muted: #8c958d;
+  --color-faint: #78817a;
+
+  --color-charge: #3ddc97;
+  --color-discharge: #ff9f43;
+  --color-solar: #f5c518;
+  --color-grid: #5aa9ff;
+  --color-acout: #ff9f43;
+  --color-dcout: #ff7a90;
+  --color-low: #ff5d5d;
+
+  --ease-ui: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --ease-enter: cubic-bezier(0.22, 1, 0.36, 1);
 }
 
-body {
-  font-family: ui-sans-serif, system-ui, sans-serif;
-  font-variant-numeric: tabular-nums;
+@layer base {
+  html {
+    background: var(--color-ground);
+    color: var(--color-text);
+    color-scheme: dark;
+    -webkit-font-smoothing: antialiased;
+  }
+  body {
+    font-family: var(--font-sans);
+    min-height: 100dvh;
+  }
+  :focus-visible {
+    outline: 2px solid var(--color-charge);
+    outline-offset: 2px;
+  }
+}
+
+@layer components {
+  .panel {
+    background: var(--color-surface);
+    border: 1px solid var(--color-line);
+    border-radius: 16px;
+  }
+  .eyebrow {
+    font-size: 12px;
+    font-weight: 500;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--color-muted);
+  }
+  .num {
+    font-family: var(--font-mono);
+    font-variant-numeric: tabular-nums;
+    letter-spacing: -0.03em;
+    color: var(--color-ink);
+  }
+  .chip {
+    display: inline-block;
+    width: 8px;
+    height: 8px;
+    border-radius: 2px;
+    flex: none;
+  }
+
+  /* Segmented control: indicator travels by transform only */
+  .seg {
+    position: relative;
+    display: inline-flex;
+    padding: 4px;
+    border-radius: 10px;
+    background: var(--color-raised);
+    border: 1px solid var(--color-line);
+  }
+  .seg__ind {
+    position: absolute;
+    top: 4px;
+    bottom: 4px;
+    left: 0;
+    border-radius: 7px;
+    background: var(--color-ink);
+    transition: transform 240ms var(--ease-ui);
+  }
+  .seg__btn {
+    position: relative;
+    z-index: 1;
+    min-height: 36px;
+    padding: 0 14px;
+    border-radius: 7px;
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--color-muted);
+    transition: color 150ms var(--ease-ui), transform 90ms var(--ease-ui);
+  }
+  .seg__btn:hover { color: var(--color-ink); }
+  .seg__btn:active { transform: scale(0.985); }
+  .seg__btn[aria-pressed='true'] { color: var(--color-ground); }
+  @media (max-width: 639px) {
+    .seg__btn { min-height: 44px; flex: 1; }
+  }
+
+  /* Power-flow lanes */
+  .lane {
+    position: relative;
+    overflow: hidden;
+    border-radius: 2px;
+    background: var(--color-line-strong);
+    transition: background-color 400ms var(--ease-ui);
+  }
+  .lane--h { height: 2px; }
+  .lane--v { width: 2px; height: 36px; margin-inline: auto; }
+  .lane.is-on { background: color-mix(in oklab, var(--c) 28%, transparent); }
+  .lane__pulse {
+    position: absolute;
+    opacity: 0;
+    background: var(--c);
+    border-radius: 2px;
+    box-shadow: 0 0 10px var(--c);
+  }
+  .lane--h .lane__pulse { top: 0; left: 0; height: 2px; width: 30%; transform: translateX(-100%); }
+  .lane--v .lane__pulse { left: 0; top: 0; width: 2px; height: 40%; transform: translateY(-100%); }
+  .lane--h.is-on .lane__pulse { opacity: 1; animation: flow-x var(--dur, 3s) linear infinite; }
+  .lane--v.is-on .lane__pulse { opacity: 1; animation: flow-y var(--dur, 3s) linear infinite; }
+
+  /* One-time entrance on load */
+  .enter {
+    animation: enter 700ms var(--ease-enter) both;
+    animation-delay: calc(var(--i, 0) * 70ms);
+  }
+}
+
+@keyframes flow-x { to { transform: translateX(340%); } }
+@keyframes flow-y { to { transform: translateY(250%); } }
+@keyframes enter {
+  from { opacity: 0; transform: translateY(8px); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .enter { animation: none; }
+  .lane .lane__pulse { animation: none !important; opacity: 0 !important; }
+  .seg__ind { transition: none; }
 }

@@ -117,6 +117,18 @@ export class MockSource extends EventEmitter implements DataSource {
         cmsChgRemTime: inW > outW ? Math.round(((100 - this.soc) / 100) * 4096 / (inW - outW) * 60) : 5999,
         cmsDsgRemTime: outW > inW ? Math.round((this.soc / 100) * 4096 / (outW - inW) * 60) : 5999,
         bmsMaxCellTemp: 28 + Math.random() * 3,
+        plugInInfoAcInVol: gridOn ? 118 + Math.random() * 4 : 1.2,
+        tempPv: pv > 0 ? 45 + pv / 20 : 27,
+        cycles: 101,
+        realSoh: 92.15,
+        designCap: 20000,
+        fullCap: 18501,
+        remainCap: Math.round(18501 * (this.soc / 100)),
+        bmsBattVol: 52 + this.soc / 50,
+        bmsMinCellVol: 3347,
+        bmsMaxCellVol: 3382,
+        accuChgEnergy: 109416,
+        accuDsgEnergy: 100810,
       }
       this.emit('snapshot', normalize(this.raw))
     }

@@ -1,4 +1,5 @@
 import crypto from 'node:crypto'
+import https from 'node:https'
 
 /**
  * Cliente mínimo de la API oficial de EcoFlow (Developer Platform / IoT Open).
@@ -57,12 +58,44 @@ function signHeaders(creds: EcoflowCredentials, params: Record<string, unknown> 
   return { accessKey: creds.accessKey, nonce, timestamp, sign }
 }
 
+// async function get<T>(creds: EcoflowCredentials, path: string, query: Record<string, string> = {}): Promise<T> {
+//   const qs = new URLSearchParams(query).toString()
+//   const res = await fetch(`${creds.host}${path}${qs ? `?${qs}` : ''}`, {
+//     headers: { ...signHeaders(creds, query), 'Content-Type': 'application/json;charset=UTF-8' },
+//   })
+//   const body = (await res.json()) as { code: string; message: string; data: T }
+//   if (body.code !== '0') throw new Error(`EcoFlow API ${path}: [${body.code}] ${body.message}`)
+//   return body.data
+// }
+
 async function get<T>(creds: EcoflowCredentials, path: string, query: Record<string, string> = {}): Promise<T> {
   const qs = new URLSearchParams(query).toString()
-  const res = await fetch(`${creds.host}${path}${qs ? `?${qs}` : ''}`, {
-    headers: { ...signHeaders(creds, query), 'Content-Type': 'application/json;charset=UTF-8' },
+  const url = new URL(`${creds.host}${path}${qs ? `?${qs}` : ''}`)
+  const payload = Object.keys(query).length ? JSON.stringify(query) : ''
+
+  const raw = await new Promise<string>((resolve, reject) => {
+    const req = https.request(
+      url,
+      {
+        method: 'GET',
+        headers: {
+          ...signHeaders(creds, query),
+          'Content-Type': 'application/json;charset=UTF-8',
+          ...(payload ? { 'Content-Length': Buffer.byteLength(payload) } : {}),
+        },
+      },
+      (res) => {
+        let data = ''
+        res.on('data', (c) => (data += c))
+        res.on('end', () => resolve(data))
+      },
+    )
+    req.on('error', reject)
+    if (payload) req.write(payload)
+    req.end()
   })
-  const body = (await res.json()) as { code: string; message: string; data: T }
+
+  const body = JSON.parse(raw) as { code: string; message: string; data: T }
   if (body.code !== '0') throw new Error(`EcoFlow API ${path}: [${body.code}] ${body.message}`)
   return body.data
 }

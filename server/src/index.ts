@@ -4,12 +4,16 @@ import path from 'node:path'
 import fs from 'node:fs'
 import { WebSocketServer, WebSocket } from 'ws'
 import { EcoflowCloudSource, MockSource, type DataSource } from './sources.js'
+import { EcoflowAppSource } from './appSource.js'
 import { ecoflowApi, type EcoflowCredentials } from './ecoflowApi.js'
 import { recordSample, history, energyByDay, prune } from './db.js'
 import type { Snapshot } from './normalize.js'
+import { trackGrid, outageReport } from './outages.js'
 
 const PORT = Number(process.env.PORT ?? 3030)
 const MOCK = process.env.ECOFLOW_MOCK === '1'
+// open = API oficial (access/secret key) · app = API de la app móvil (correo/contraseña)
+const MODE = (process.env.ECOFLOW_MODE ?? 'open') as 'open' | 'app'
 const creds: EcoflowCredentials = {
   accessKey: process.env.ECOFLOW_ACCESS_KEY ?? '',
   secretKey: process.env.ECOFLOW_SECRET_KEY ?? '',
@@ -17,12 +21,25 @@ const creds: EcoflowCredentials = {
 }
 const SN = process.env.ECOFLOW_SN ?? ''
 
-if (!MOCK && (!creds.accessKey || !creds.secretKey || !SN)) {
-  console.error('Faltan ECOFLOW_ACCESS_KEY / ECOFLOW_SECRET_KEY / ECOFLOW_SN en .env (o usa npm run dev:mock)')
+function fail(msg: string): never {
+  console.error(msg + ' (o usa npm run dev:mock)')
   process.exit(1)
 }
 
-const source: DataSource = MOCK ? new MockSource() : new EcoflowCloudSource(creds, SN)
+function createSource(): DataSource {
+  if (MOCK) return new MockSource()
+  if (!SN) fail('Falta ECOFLOW_SN en .env')
+  if (MODE === 'app') {
+    const email = process.env.ECOFLOW_EMAIL ?? ''
+    const password = process.env.ECOFLOW_PASSWORD ?? ''
+    if (!email || !password) fail('Faltan ECOFLOW_EMAIL / ECOFLOW_PASSWORD en .env')
+    return new EcoflowAppSource({ email, password, host: process.env.ECOFLOW_APP_HOST ?? 'api.ecoflow.com' }, SN)
+  }
+  if (!creds.accessKey || !creds.secretKey) fail('Faltan ECOFLOW_ACCESS_KEY / ECOFLOW_SECRET_KEY en .env')
+  return new EcoflowCloudSource(creds, SN)
+}
+
+const source = createSource()
 let latest: Snapshot | null = null
 
 const app = express()
@@ -37,6 +54,7 @@ const broadcast = (data: unknown) => {
 source.on('snapshot', (s) => {
   latest = s
   recordSample(s)
+  trackGrid(s, () => broadcast({ type: 'outage' }))
   broadcast({ type: 'snapshot', data: s })
 })
 source.on('status', (online) => broadcast({ type: 'status', online }))
@@ -51,6 +69,7 @@ app.get('/api/history', (req, res) => {
   res.json(history(Date.now() - hours * 3_600_000))
 })
 app.get('/api/energy', (req, res) => res.json(energyByDay(Math.min(Number(req.query.days ?? 7), 120))))
+app.get('/api/outages', (req, res) => res.json(outageReport(Math.min(Number(req.query.days ?? 30), 120))))
 app.get('/api/raw', (_req, res) => res.json(source.raw)) // útil para mapear claves nuevas
 app.get('/api/devices', async (_req, res) => {
   try {
@@ -68,7 +87,7 @@ if (fs.existsSync(dist)) {
 }
 
 server.listen(PORT, async () => {
-  console.log(`EcoFlow Monitor en http://localhost:${PORT} ${MOCK ? '(modo simulado)' : ''}`)
+  console.log(`EcoFlow Monitor en http://localhost:${PORT} (${MOCK ? 'simulado' : MODE === 'app' ? 'API app' : 'API oficial'})`)
   prune()
   setInterval(prune, 6 * 3_600_000)
   try {
