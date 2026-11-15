@@ -16,6 +16,18 @@ EcoFlow ──wifi──> nube EcoFlow ──MQTT──> server (Node, tu PC) �
    - `ECOFLOW_API_HOST`: usa la región de tu cuenta (`api-a` América, `api-e` Europa, `api` global).
    - El SN lo ves en la app, o arranca el server y abre `http://localhost:3030/api/devices`.
 
+### Modo "app" (DELTA 3 Plus y otros modelos que la API oficial no deja leer)
+Si `quota/all` devuelve **[1006] current device is not allowed to get device info**, usa la API de la app móvil:
+```
+ECOFLOW_MODE=app
+ECOFLOW_EMAIL=tu_correo_de_la_app
+ECOFLOW_PASSWORD=tu_contraseña
+ECOFLOW_SN=P351...
+```
+El server hace login como la app, se conecta al MQTT de la app (`/app/device/property/{sn}`) y decodifica
+los mensajes protobuf del Delta 3 (`server/proto/ef_delta3.proto`, tomado de tolwi/hassio-ecoflow-cloud, Apache-2.0).
+No es una API oficial: EcoFlow puede cambiarla.
+
 ## 2. Correr
 ```bash
 npm install

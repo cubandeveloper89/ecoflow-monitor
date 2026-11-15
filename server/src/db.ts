@@ -5,7 +5,7 @@ import type { Snapshot } from './normalize.js'
 
 const dir = path.resolve(import.meta.dirname, '../../data')
 fs.mkdirSync(dir, { recursive: true })
-const db = new Database(path.join(dir, 'ecoflow.db'))
+export const db = new Database(path.join(dir, 'ecoflow.db'))
 db.pragma('journal_mode = WAL')
 
 db.exec(`
@@ -28,10 +28,11 @@ const insert = db.prepare(
 export function recordSample(s: Snapshot) {
   if (s.ts - lastInsert < SAMPLE_EVERY_MS) return
   lastInsert = s.ts
-  insert.run(s)
+  const { ts, soc, inW, outW, acInW, pvInW, acOutW, dcOutW, tempC } = s
+  insert.run({ ts, soc, inW, outW, acInW, pvInW, acOutW, dcOutW, tempC })
 }
 
-export type Sample = Omit<Snapshot, 'ts' | 'chgRemainMin' | 'dsgRemainMin'> & { ts: number }
+export type Sample = Pick<Snapshot, 'ts' | 'soc' | 'inW' | 'outW' | 'acInW' | 'pvInW' | 'acOutW' | 'dcOutW' | 'tempC'>
 
 export function history(fromTs: number, toTs = Date.now(), maxPoints = 600): Sample[] {
   const rows = db.prepare('SELECT * FROM samples WHERE ts BETWEEN ? AND ? ORDER BY ts').all(fromTs, toTs) as Sample[]

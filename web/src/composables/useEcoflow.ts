@@ -7,6 +7,8 @@ export function useEcoflow() {
   const connected = ref(false)
   const mock = ref(false)
   const sn = ref('')
+  /** Se incrementa cuando el server confirma un cambio de corriente (empieza/termina apagón) */
+  const outageTick = ref(0)
   let ws: WebSocket | null = null
   let retry: number | undefined
   let closed = false
@@ -29,6 +31,8 @@ export function useEcoflow() {
       } else if (msg.type === 'snapshot') {
         live.value = msg.data
         online.value = true
+      } else if (msg.type === 'outage') {
+        outageTick.value++
       } else if (msg.type === 'status') {
         online.value = msg.online
       }
@@ -42,5 +46,5 @@ export function useEcoflow() {
     ws?.close()
   })
 
-  return { live, online, connected, mock, sn }
+  return { live, online, connected, mock, sn, outageTick }
 }

@@ -11,6 +11,7 @@
     "better-sqlite3": "^11.8.1",
     "express": "^4.21.2",
     "mqtt": "^5.10.3",
+    "protobufjs": "^7.6.6",
     "ws": "^8.18.0"
   },
   "devDependencies": {
