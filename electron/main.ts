@@ -19,7 +19,9 @@ const DEV_URL = process.env.VITE_DEV_SERVER_URL // lo pone scripts/dev.mjs
 const startHidden = process.argv.includes('--hidden')
 const forceMock = process.argv.includes('--mock') // npm run dev:mock
 
-if (!app.requestSingleInstanceLock()) app.quit()
+// Solo una instancia: si ya está abierta, la segunda le pide mostrarse y se cierra
+const gotLock = app.requestSingleInstanceLock()
+if (!gotLock) app.exit(0)
 
 app.setAppUserModelId(APP_ID) // necesario para notificaciones en Windows
 
@@ -57,7 +59,7 @@ function createWindow() {
 
   win.loadURL(DEV_URL ?? `http://127.0.0.1:${server.port}`)
   win.once('ready-to-show', () => {
-    if (!startHidden) win?.show()
+    if (!startHidden || showWhenReady) win?.show()
     if (DEV_URL) win?.webContents.openDevTools({ mode: 'detach' })
   })
 
@@ -82,7 +84,14 @@ function createWindow() {
   win.on('closed', () => (win = null))
 }
 
+let showWhenReady = false
+
 function showWindow() {
+  // Puede llamarse antes de que el servidor esté listo (p. ej. abrir la app dos veces seguidas)
+  if (!server) {
+    showWhenReady = true
+    return
+  }
   if (!win) createWindow()
   if (win!.isMinimized()) win!.restore()
   win!.show()
