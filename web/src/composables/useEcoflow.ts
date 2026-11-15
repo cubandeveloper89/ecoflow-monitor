@@ -7,6 +7,9 @@ export function useEcoflow() {
   const connected = ref(false)
   const mock = ref(false)
   const sn = ref('')
+  /** false = el servidor no tiene equipo configurado (app de escritorio recién instalada) */
+  const configured = ref(true)
+  const sourceError = ref<string | null>(null)
   /** Se incrementa cuando el server confirma un cambio de corriente (empieza/termina apagón) */
   const outageTick = ref(0)
   let ws: WebSocket | null = null
@@ -26,6 +29,8 @@ export function useEcoflow() {
       if (msg.type === 'hello') {
         mock.value = msg.mock
         sn.value = msg.sn
+        configured.value = msg.configured ?? true
+        sourceError.value = msg.error ?? null
         online.value = msg.online
         live.value = msg.data
       } else if (msg.type === 'snapshot') {
@@ -46,5 +51,5 @@ export function useEcoflow() {
     ws?.close()
   })
 
-  return { live, online, connected, mock, sn, outageTick }
+  return { live, online, connected, mock, sn, outageTick, configured, sourceError }
 }

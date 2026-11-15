@@ -1,15 +1,93 @@
 {
   "name": "ecoflow-monitor",
+  "productName": "EcoFlow Monitor",
   "private": true,
-  "version": "0.1.0",
-  "workspaces": ["server", "web"],
+  "version": "0.2.0",
+  "description": "Monitor de carga, descarga y apagones para EcoFlow",
+  "author": "cubandeveloper89",
+  "license": "UNLICENSED",
+  "main": "dist-electron/main.cjs",
+  "workspaces": [
+    "server",
+    "web"
+  ],
   "scripts": {
-    "dev": "concurrently -n server,web -c cyan,magenta \"npm run dev -w server\" \"npm run dev -w web\"",
-    "dev:mock": "concurrently -n server,web -c cyan,magenta \"npm run dev:mock -w server\" \"npm run dev -w web\"",
-    "build": "npm run build -w web",
-    "start": "npm run start -w server"
+    "dev": "node scripts/dev.mjs",
+    "dev:mock": "node scripts/dev.mjs --mock",
+    "dev:web": "concurrently -n server,web -c cyan,magenta \"npm run dev -w server\" \"npm run dev -w web\"",
+    "dev:web:mock": "concurrently -n server,web -c cyan,magenta \"npm run dev:mock -w server\" \"npm run dev -w web\"",
+    "build": "npm run build -w web && node scripts/build-electron.mjs",
+    "typecheck": "tsc -p electron && tsc -p server && npm run build -w web",
+    "start": "npm run build && electron .",
+    "start:server": "npm run start -w server",
+    "dist": "npm run build && electron-builder --win --publish never",
+    "release": "npm run build && electron-builder --win --publish always"
+  },
+  "dependencies": {
+    "electron-updater": "^6.6.2"
   },
   "devDependencies": {
-    "concurrently": "^9.1.0"
+    "concurrently": "^9.1.0",
+    "electron": "^45.3.2",
+    "electron-builder": "^26.0.12",
+    "esbuild": "^0.28.2"
+  },
+  "build": {
+    "appId": "com.cubandeveloper89.ecoflowmonitor",
+    "productName": "EcoFlow Monitor",
+    "artifactName": "EcoFlow-Monitor-Setup-${version}.${ext}",
+    "directories": {
+      "output": "release",
+      "buildResources": "build"
+    },
+    "files": [
+      "dist-electron/**",
+      "web/dist/**",
+      "server/proto/**",
+      "build/icon.png",
+      "build/tray.png",
+      "package.json",
+      "!**/node_modules/**/*.{md,map,ts}"
+    ],
+    "asarUnpack": [
+      "server/proto/**"
+    ],
+    "npmRebuild": false,
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "build/icon.png"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "shortcutName": "EcoFlow Monitor",
+      "deleteAppDataOnUninstall": false
+    },
+    "linux": {
+      "target": [
+        "dir"
+      ],
+      "category": "Utility"
+    },
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "cubandeveloper89",
+        "repo": "ecoflow-monitor",
+        "releaseType": "release"
+      }
+    ]
+  },
+  "engines": {
+    "node": ">=22.13"
   }
 }

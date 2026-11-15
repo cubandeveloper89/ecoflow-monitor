@@ -6,15 +6,18 @@ import type { Snapshot } from './normalize.js'
  * Un cambio (hay corriente ↔ no hay) se confirma solo si dura ≥ 20 s, para ignorar parpadeos.
  * Si el server estuvo apagado durante un cambio, la hora queda marcada como aproximada.
  */
-db.exec(`
-  CREATE TABLE IF NOT EXISTS outages (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    start INTEGER NOT NULL,
-    end INTEGER,
-    approx INTEGER NOT NULL DEFAULT 0
-  );
-  CREATE INDEX IF NOT EXISTS outages_start ON outages(start);
-`)
+export function initOutages() {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS outages (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      start INTEGER NOT NULL,
+      end INTEGER,
+      approx INTEGER NOT NULL DEFAULT 0
+    );
+    CREATE INDEX IF NOT EXISTS outages_start ON outages(start);
+  `)
+  confirmed = openRow() ? false : null
+}
 
 const CONFIRM_MS = 20_000
 const STALE_MS = 5 * 60_000 // más de 5 min sin datos → no sabemos cuándo cambió exactamente
@@ -26,15 +29,19 @@ interface Row {
   approx: number
 }
 
-const openRow = () => db.prepare('SELECT * FROM outages WHERE end IS NULL ORDER BY start DESC LIMIT 1').get() as Row | undefined
+const openRow = () => db.prepare('SELECT * FROM outages WHERE end IS NULL ORDER BY start DESC LIMIT 1').get() as unknown as Row | undefined
 
 // Estado confirmado: false = apagón en curso. null = aún no sabemos (recién arrancó el server)
-let confirmed: boolean | null = openRow() ? false : null
+let confirmed: boolean | null = null
 let candidate: { on: boolean; since: number } | null = null
 let lastSeen = 0
 let restored = true // primera lectura tras arrancar
 
-export function trackGrid(s: Snapshot, onChange?: () => void) {
+export type OutageEvent =
+  | { type: 'start'; at: number; approx: boolean }
+  | { type: 'end'; start: number; end: number; durationMin: number; approx: boolean }
+
+export function trackGrid(s: Snapshot, onChange?: (e: OutageEvent | null) => void) {
   if (s.gridOn === null) return
   const now = s.ts
   const stale = restored || now - lastSeen > STALE_MS
@@ -49,28 +56,33 @@ export function trackGrid(s: Snapshot, onChange?: () => void) {
 
   // Tras un hueco sin datos el cambio ya ocurrió: confirmar de inmediato, con hora aproximada
   if (stale && confirmed !== null) {
-    apply(s.gridOn, lastBefore || now, true)
-    onChange?.()
+    onChange?.(apply(s.gridOn, lastBefore || now, true))
     return
   }
 
   if (!candidate || candidate.on !== s.gridOn) candidate = { on: s.gridOn, since: now }
   if (now - candidate.since >= CONFIRM_MS) {
     // Primer estado conocido: si arrancamos durante un apagón, su inicio es aproximado
-    apply(s.gridOn, candidate.since, confirmed === null)
+    const e = apply(s.gridOn, candidate.since, confirmed === null)
     candidate = null
-    onChange?.()
+    onChange?.(e)
   }
 }
 
-function apply(on: boolean, at: number, approx: boolean) {
+function apply(on: boolean, at: number, approx: boolean): OutageEvent | null {
+  let event: OutageEvent | null = null
   if (on) {
     const row = openRow()
-    if (row) db.prepare('UPDATE outages SET end = ?, approx = approx | ? WHERE id = ?').run(at, approx ? 1 : 0, row.id)
+    if (row) {
+      db.prepare('UPDATE outages SET end = ?, approx = approx | ? WHERE id = ?').run(at, approx ? 1 : 0, row.id)
+      event = { type: 'end', start: row.start, end: at, durationMin: Math.round((at - row.start) / 60_000), approx: approx || !!row.approx }
+    }
   } else if (!openRow()) {
     db.prepare('INSERT INTO outages (start, approx) VALUES (?, ?)').run(at, approx ? 1 : 0)
+    event = { type: 'start', at, approx }
   }
   confirmed = on
+  return event
 }
 
 export interface Outage {
@@ -85,7 +97,7 @@ export function outageReport(days: number) {
   const from = now - days * 86_400_000
   const rows = db
     .prepare('SELECT * FROM outages WHERE end IS NULL OR end >= ? ORDER BY start DESC')
-    .all(from) as Row[]
+    .all(from) as unknown as Row[]
   const items: Outage[] = rows.map((r) => ({
     start: r.start,
     end: r.end,

@@ -1,57 +1,97 @@
 # EcoFlow Monitor
 
-Web app local (Vue 3 + TS + Tailwind / Node) para ver en vivo la carga y descarga de tu EcoFlow
-y guardar historial, usando la **API oficial de EcoFlow** (REST + MQTT en la nube).
+App de escritorio (Electron + Vue 3 + TS + Tailwind) para ver en vivo la carga y descarga de tu EcoFlow,
+guardar historial y registrar los apagones. También funciona como web local en el navegador.
 
 ```
-EcoFlow ──wifi──> nube EcoFlow ──MQTT──> server (Node, tu PC) ──WebSocket──> navegador (Vue)
-                                              └─ SQLite: muestra cada 15 s → historial y kWh por día
+EcoFlow ──wifi──> nube EcoFlow ──MQTT──> servidor (Node, dentro de la app) ──WebSocket──> ventana (Vue)
+                                              └─ SQLite: muestra cada 15 s → historial, kWh por día y apagones
 ```
 
-## 1. Credenciales
-1. Entra a https://developer.ecoflow.com con tu cuenta de la app EcoFlow y pide acceso de desarrollador
-   (la aprobación puede tardar unos días).
-2. En *Access Key*, crea un par **Access Key / Secret Key**.
-3. Copia `.env.example` a `.env` y llena `ECOFLOW_ACCESS_KEY`, `ECOFLOW_SECRET_KEY`, `ECOFLOW_SN`.
-   - `ECOFLOW_API_HOST`: usa la región de tu cuenta (`api-a` América, `api-e` Europa, `api` global).
-   - El SN lo ves en la app, o arranca el server y abre `http://localhost:3030/api/devices`.
+## App de escritorio
 
-### Modo "app" (DELTA 3 Plus y otros modelos que la API oficial no deja leer)
-Si `quota/all` devuelve **[1006] current device is not allowed to get device info**, usa la API de la app móvil:
-```
-ECOFLOW_MODE=app
-ECOFLOW_EMAIL=tu_correo_de_la_app
-ECOFLOW_PASSWORD=tu_contraseña
-ECOFLOW_SN=P351...
-```
-El server hace login como la app, se conecta al MQTT de la app (`/app/device/property/{sn}`) y decodifica
-los mensajes protobuf del Delta 3 (`server/proto/ef_delta3.proto`, tomado de tolwi/hassio-ecoflow-cloud, Apache-2.0).
-No es una API oficial: EcoFlow puede cambiarla.
-
-## 2. Correr
+### Desarrollo
 ```bash
 npm install
-npm run dev:mock   # UI con datos simulados, sin equipo → http://localhost:5173
-npm run dev        # con tu EcoFlow real
+npm run dev:mock   # app con datos simulados
+npm run dev        # app con tu EcoFlow (la primera vez pide correo, contraseña y SN)
 ```
-Producción (todo en un puerto): `npm run build && npm start` → http://localhost:3030
+- Los cambios en `web/` se ven al instante en la ventana (Vite).
+- Los cambios en `electron/` o `server/` reinician la app sola.
+- DevTools: `F12` o `Ctrl+Shift+I` (también en la app instalada).
 
-## 3. Endpoints
+### Instalador
+```bash
+npm run dist       # → release/EcoFlow-Monitor-Setup-<versión>.exe
+```
+
+### Publicar una actualización
+Las apps instaladas buscan versiones nuevas en GitHub Releases al arrancar y cada 6 h,
+la descargan en segundo plano y la instalan al cerrar (o con "Reiniciar y actualizar").
+
+1. Sube la versión en `package.json` (por ejemplo `0.2.0` → `0.3.0`) y haz commit.
+2. Crea y sube el tag:
+   ```bash
+   git tag v0.3.0
+   git push origin main --tags
+   ```
+3. GitHub Actions (`.github/workflows/release.yml`) compila el instalador en Windows y lo publica en Releases.
+
+Alternativa sin Actions: `GH_TOKEN=<token con permiso repo> npm run release` desde tu PC.
+
+> El instalador no está firmado: Windows SmartScreen avisará la primera vez ("Más información → Ejecutar de todas formas").
+
+### Dónde guarda las cosas
+| Qué | Dónde (Windows) |
+|---|---|
+| Configuración (contraseña cifrada con DPAPI) | `%APPDATA%\EcoFlow Monitor\config.json` |
+| Historial y apagones | `%APPDATA%\EcoFlow Monitor\data\ecoflow.db` |
+
+La primera vez que corres `npm run dev`, si existe `./data/ecoflow.db` (de la versión web) se copia ahí.
+
+### Qué hace la app
+- Al cerrar la ventana queda en la bandeja del sistema y sigue registrando.
+- Opción de iniciar con Windows (arranca escondida).
+- Notificaciones: se fue / volvió la corriente, batería baja, batería llena.
+- Si no hay internet (apagón), reintenta conectar cada minuto.
+- Opcional: ver el monitor desde el móvil en la red local (`http://IP-de-la-PC:3030`).
+
+## Conexión con EcoFlow
+Se configura desde la app (botón ⚙). Dos modos:
+
+- **Cuenta de la app** (recomendado, necesario para DELTA 3 Plus): correo y contraseña de la app de EcoFlow.
+  Usa la misma API privada que la app móvil y decodifica los mensajes protobuf del Delta 3
+  (`server/proto/ef_delta3.proto`, tomado de tolwi/hassio-ecoflow-cloud, Apache-2.0). No es oficial: EcoFlow puede cambiarla.
+- **API oficial**: Access Key y Secret Key de https://developer.ecoflow.com. Algunos modelos devuelven
+  `[1006] current device is not allowed to get device info` y no envían datos.
+
+## Versión web (sin Electron)
+Necesita Node ≥ 22.13 y un `.env` (ver `.env.example`).
+```bash
+npm run dev:web:mock   # http://localhost:5173 con datos simulados
+npm run dev:web        # con tu EcoFlow
+npm run start:server   # solo el servidor en http://localhost:3030 (sirve web/dist si existe)
+```
+
+### Endpoints
 | Ruta | Qué devuelve |
 |---|---|
 | `/api/state` | último snapshot normalizado |
 | `/api/history?hours=24` | serie de potencia/SOC (máx. 600 puntos) |
 | `/api/energy?days=7` | Wh cargados/consumidos por día |
-| `/api/raw` | quota crudo del equipo (para mapear claves) |
-| `/api/devices` | equipos de tu cuenta |
+| `/api/outages?days=30` | apagones y estadísticas |
+| `/api/raw` | datos crudos del equipo (para mapear claves) |
 | `ws://…/ws` | stream en vivo |
 
-## 4. Si algún valor sale "—"
-Los nombres de campos cambian por modelo (Delta 3 / Pro 3 usan `powInSumW`, `cmsBattSoc`…;
-el Delta Pro original usa `pd.wattsInSum`, `bmsMaster.soc`…). Abre `/api/raw`, busca la clave
-correcta y agrégala en `server/src/normalize.ts`.
+## Si algún valor sale "—"
+Los nombres de campos cambian por modelo. Abre `/api/raw`, busca la clave correcta y agrégala en
+`server/src/normalize.ts`.
 
-## Notas
-- Necesita internet en el EcoFlow y en la PC. Si el MQTT se cae, igual refresca por REST cada 60 s.
-- La energía se calcula integrando la potencia; huecos de más de 5 min (PC apagada) no cuentan.
-- El historial se guarda en `data/ecoflow.db` (120 días).
+## Estructura
+```
+electron/   main (ventana, bandeja, avisos, inicio con Windows), preload, config, actualizaciones
+server/     API + MQTT + SQLite (node:sqlite). app.ts = servidor embebible, index.ts = CLI con .env
+web/        dashboard Vue
+scripts/    dev.mjs (Vite + Electron), build-electron.mjs (esbuild)
+build/      íconos
+```

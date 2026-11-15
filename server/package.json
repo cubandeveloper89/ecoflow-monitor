@@ -8,19 +8,18 @@
     "start": "tsx --env-file-if-exists=../.env src/index.ts"
   },
   "dependencies": {
-    "better-sqlite3": "^11.8.1",
     "express": "^4.21.2",
     "mqtt": "^5.10.3",
     "protobufjs": "^7.6.6",
     "ws": "^8.18.0"
   },
   "devDependencies": {
-    "@types/better-sqlite3": "^7.6.12",
     "@types/express": "^5.0.0",
     "@types/node": "^22.10.0",
     "@types/ws": "^8.5.13",
     "cross-env": "^7.0.3",
     "tsx": "^4.19.2",
     "typescript": "^5.7.2"
-  }
+  },
+  "main": "src/app.ts"
 }

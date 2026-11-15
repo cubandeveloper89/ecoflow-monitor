@@ -7,10 +7,26 @@ import PowerChart from './components/PowerChart.vue'
 import EnergyChart from './components/EnergyChart.vue'
 import OutagesPanel from './components/OutagesPanel.vue'
 import BatteryHealth from './components/BatteryHealth.vue'
+import SettingsPanel from './components/SettingsPanel.vue'
+import { desktop, type UpdateStatus } from './desktop'
 import { C } from './theme'
 import type { Sample, DayEnergy, OutageReport } from './types'
 
-const { live, online, connected, mock, sn, outageTick } = useEcoflow()
+const { live, online, connected, mock, sn, outageTick, configured, sourceError } = useEcoflow()
+
+/* ---- App de escritorio: configuración y actualizaciones ---- */
+const settingsOpen = ref(false)
+const firstRun = computed(() => !!desktop && !configured.value)
+watch(firstRun, (v) => v && (settingsOpen.value = true), { immediate: true })
+
+const update = ref<UpdateStatus | null>(null)
+const offs: Array<() => void> = []
+if (desktop) {
+  desktop.getUpdateStatus().then((s) => (update.value = s))
+  offs.push(desktop.onUpdateStatus((s) => (update.value = s)))
+  offs.push(desktop.onOpenSettings(() => (settingsOpen.value = true)))
+}
+onUnmounted(() => offs.forEach((off) => off()))
 
 const netW = computed(() => (live.value?.inW ?? 0) - (live.value?.outW ?? 0))
 
@@ -117,8 +133,35 @@ const updated = computed(() => (live.value ? new Date(live.value.ts).toLocaleTim
           <span class="size-2 rounded-full" :style="{ background: online ? C.charge : C.faint }" />
           <span :class="online ? 'text-text' : 'text-muted'">{{ online ? 'Equipo en línea' : 'Equipo offline' }}</span>
         </li>
+        <li v-if="desktop">
+          <button
+            type="button" class="flex size-[34px] items-center justify-center rounded-full border border-line bg-surface text-muted transition-colors hover:text-ink"
+            aria-label="Configuración" title="Configuración" @click="settingsOpen = true"
+          >
+            <svg viewBox="0 0 20 20" class="size-4" fill="none" stroke="currentColor" stroke-width="1.6">
+              <circle cx="10" cy="10" r="2.6" />
+              <path d="M10 1.8v2.4M10 15.8v2.4M1.8 10h2.4M15.8 10h2.4M4.2 4.2l1.7 1.7M14.1 14.1l1.7 1.7M4.2 15.8l1.7-1.7M14.1 5.9l1.7-1.7" stroke-linecap="round" />
+            </svg>
+          </button>
+        </li>
       </ul>
     </header>
+
+    <!-- Avisos de la app: actualización lista / error de conexión -->
+    <div
+      v-if="update?.state === 'downloaded'"
+      class="enter mb-4 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-charge/40 bg-charge/10 px-4 py-3 text-[13px]"
+    >
+      <span class="text-text">La versión <span class="num text-ink">{{ update.version }}</span> está lista. Se instala al cerrar la app.</span>
+      <button type="button" class="font-medium text-charge underline underline-offset-4" @click="desktop?.installUpdate()">Reiniciar y actualizar</button>
+    </div>
+    <div
+      v-if="sourceError && !settingsOpen"
+      class="enter mb-4 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-low/40 bg-low/10 px-4 py-3 text-[13px]" role="alert"
+    >
+      <span class="text-text">No se pudo conectar al EcoFlow: {{ sourceError }}</span>
+      <button v-if="desktop" type="button" class="font-medium text-low underline underline-offset-4" @click="settingsOpen = true">Revisar configuración</button>
+    </div>
 
     <main>
       <!-- Live power flow -->
@@ -211,5 +254,7 @@ const updated = computed(() => (live.value ? new Date(live.value.ts).toLocaleTim
         <BatteryHealth :battery="live?.battery ?? null" :temp-c="live?.tempC ?? null" />
       </section>
     </main>
+
+    <SettingsPanel v-if="settingsOpen" :first-run="firstRun" :update="update" @close="settingsOpen = false" />
   </div>
 </template>

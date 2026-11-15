@@ -1,29 +1,38 @@
-import Database from 'better-sqlite3'
+import { DatabaseSync, type StatementSync } from 'node:sqlite'
 import fs from 'node:fs'
 import path from 'node:path'
 import type { Snapshot } from './normalize.js'
 
-const dir = path.resolve(import.meta.dirname, '../../data')
-fs.mkdirSync(dir, { recursive: true })
-export const db = new Database(path.join(dir, 'ecoflow.db'))
-db.pragma('journal_mode = WAL')
+/**
+ * SQLite nativo de Node (node:sqlite, Node ≥ 22.13). Sin módulos nativos que recompilar,
+ * así funciona igual con Node y dentro de Electron.
+ */
+export let db: DatabaseSync
+let insert: StatementSync
 
-db.exec(`
-  CREATE TABLE IF NOT EXISTS samples (
-    ts INTEGER PRIMARY KEY,
-    soc REAL, inW REAL, outW REAL, acInW REAL, pvInW REAL, acOutW REAL, dcOutW REAL, tempC REAL
-  );
-`)
+export function initDb(dir: string) {
+  if (db) return db
+  fs.mkdirSync(dir, { recursive: true })
+  db = new DatabaseSync(path.join(dir, 'ecoflow.db'))
+  db.exec('PRAGMA journal_mode = WAL')
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS samples (
+      ts INTEGER PRIMARY KEY,
+      soc REAL, inW REAL, outW REAL, acInW REAL, pvInW REAL, acOutW REAL, dcOutW REAL, tempC REAL
+    );
+  `)
+  insert = db.prepare(
+    `INSERT OR REPLACE INTO samples (ts, soc, inW, outW, acInW, pvInW, acOutW, dcOutW, tempC)
+     VALUES (@ts, @soc, @inW, @outW, @acInW, @pvInW, @acOutW, @dcOutW, @tempC)`,
+  )
+  return db
+}
 
 const SAMPLE_EVERY_MS = 15_000
 const RETENTION_DAYS = 120
 const MAX_GAP_MS = 5 * 60_000 // huecos mayores (equipo/PC apagado) no cuentan para la energía
 
 let lastInsert = 0
-const insert = db.prepare(
-  `INSERT OR REPLACE INTO samples (ts, soc, inW, outW, acInW, pvInW, acOutW, dcOutW, tempC)
-   VALUES (@ts, @soc, @inW, @outW, @acInW, @pvInW, @acOutW, @dcOutW, @tempC)`,
-)
 
 export function recordSample(s: Snapshot) {
   if (s.ts - lastInsert < SAMPLE_EVERY_MS) return
@@ -35,7 +44,7 @@ export function recordSample(s: Snapshot) {
 export type Sample = Pick<Snapshot, 'ts' | 'soc' | 'inW' | 'outW' | 'acInW' | 'pvInW' | 'acOutW' | 'dcOutW' | 'tempC'>
 
 export function history(fromTs: number, toTs = Date.now(), maxPoints = 600): Sample[] {
-  const rows = db.prepare('SELECT * FROM samples WHERE ts BETWEEN ? AND ? ORDER BY ts').all(fromTs, toTs) as Sample[]
+  const rows = db.prepare('SELECT * FROM samples WHERE ts BETWEEN ? AND ? ORDER BY ts').all(fromTs, toTs) as unknown as Sample[]
   if (rows.length <= maxPoints) return rows
   // Reducción simple: promedio por bucket
   const bucket = Math.ceil(rows.length / maxPoints)
@@ -75,7 +84,7 @@ export function energyByDay(days: number): DayEnergy[] {
   start.setDate(start.getDate() - (days - 1))
   const rows = db
     .prepare('SELECT ts, inW, outW, acInW, pvInW FROM samples WHERE ts >= ? ORDER BY ts')
-    .all(start.getTime()) as Pick<Sample, 'ts' | 'inW' | 'outW' | 'acInW' | 'pvInW'>[]
+    .all(start.getTime()) as unknown as Pick<Sample, 'ts' | 'inW' | 'outW' | 'acInW' | 'pvInW'>[]
 
   const map = new Map<string, DayEnergy>()
   for (let d = 0; d < days; d++) {
