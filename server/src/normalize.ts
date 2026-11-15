@@ -122,7 +122,7 @@ export function normalize(raw: Raw): Snapshot {
     tempC: round(tempC, 1),
     gridV: round(gridV),
     gridOn,
-    pvTempC: first(raw, ['tempPv']),
+    pvTempC: round(first(raw, ['tempPv'])),
     battery,
   }
 }

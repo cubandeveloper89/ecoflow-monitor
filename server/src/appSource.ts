@@ -37,7 +37,10 @@ interface Cert {
   certificatePassword: string
 }
 
-const PROTO_PATH = path.resolve(import.meta.dirname, '../proto/ef_delta3.proto')
+/** Ruta del .proto. Electron la fija con setProtoPath() porque ahí el código va empaquetado. */
+let protoPath =
+  typeof import.meta.dirname === 'string' ? path.resolve(import.meta.dirname, '../proto/ef_delta3.proto') : ''
+export const setProtoPath = (p: string) => (protoPath = p)
 
 async function apiJson<T>(url: string, init: RequestInit): Promise<T> {
   const res = await fetch(url, init)
@@ -138,7 +141,7 @@ export class EcoflowAppSource extends EventEmitter implements DataSource {
   }
 
   async start() {
-    this.root = await protobuf.load(PROTO_PATH)
+    this.root = await protobuf.load(protoPath)
 
     const l = await login(this.creds)
     this.userId = l.userId
